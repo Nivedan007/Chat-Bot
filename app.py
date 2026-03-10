@@ -6,6 +6,13 @@ from google import genai
 
 app = Flask(__name__)
 
+SYSTEM_PROMPT = (
+    "You are a precise assistant. Answer the user's exact question directly and completely. "
+    "Do not give vague replies. If the user asks for steps, provide clear numbered steps. "
+    "If the user asks for an explanation, include key details and examples when useful. "
+    "Keep the response focused on what was asked."
+)
+
 
 def _load_local_env() -> None:
     # Minimal .env parser for simple KEY=VALUE lines.
@@ -55,8 +62,30 @@ def home():
 def chat():
     payload = request.get_json(silent=True) or {}
     user_message = payload.get("message", "")
+    history = payload.get("history", [])
     if not user_message.strip():
         return jsonify({"reply": "Message cannot be empty."}), 400
+
+    conversation_lines = []
+    if isinstance(history, list):
+        # Keep context bounded to recent turns for speed and token control.
+        for item in history[-20:]:
+            if not isinstance(item, dict):
+                continue
+            role = str(item.get("role", "")).strip().lower()
+            content = str(item.get("content", "")).strip()
+            if role not in {"user", "assistant"} or not content:
+                continue
+            conversation_lines.append(f"{role.title()}: {content}")
+
+    if conversation_lines:
+        user_prompt = (
+            "Use this conversation context to answer the latest user question clearly and completely.\n\n"
+            + "\n".join(conversation_lines)
+            + f"\n\nLatest user question: {user_message.strip()}"
+        )
+    else:
+        user_prompt = user_message.strip()
 
     api_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
     if not api_key:
@@ -73,9 +102,13 @@ def chat():
             response = client.models.generate_content(
                 model=model_name,
                 contents=[
-                    "You are a helpful AI assistant.",
-                    user_message,
+                    SYSTEM_PROMPT,
+                    user_prompt,
                 ],
+                config={
+                    "temperature": 0.3,
+                    "max_output_tokens": 2048,
+                },
             )
             reply = response.text if response and response.text else "No response generated."
             return jsonify({"reply": reply})

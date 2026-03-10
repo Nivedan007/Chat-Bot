@@ -12,6 +12,7 @@
 			--bg-1: #eef3ea;
 			--bg-2: #dce5d4;
 			--panel: #f6f8f3;
+			--sidebar: #e8efe2;
 			--panel-border: rgba(32, 45, 31, 0.12);
 			--ink: #1f2a1e;
 			--muted: #5a6857;
@@ -50,16 +51,83 @@
 			box-shadow: var(--shadow);
 			background: var(--panel);
 			display: flex;
-			flex-direction: column;
 			overflow: hidden;
 			backdrop-filter: blur(4px);
+		}
+
+		.sidebar {
+			width: 290px;
+			border-right: 1px solid var(--panel-border);
+			background: var(--sidebar);
+			display: flex;
+			flex-direction: column;
+			padding: 14px;
+			gap: 12px;
+		}
+
+		.new-chat {
+			border: 0;
+			padding: 12px 14px;
+			border-radius: 14px;
+			background: var(--accent);
+			color: #fff;
+			font: inherit;
+			font-weight: 700;
+			cursor: pointer;
+		}
+
+		.history-list {
+			overflow-y: auto;
+			display: flex;
+			flex-direction: column;
+			gap: 8px;
+			padding-right: 2px;
+		}
+
+		.history-item {
+			text-align: left;
+			border: 1px solid var(--panel-border);
+			background: rgba(255, 255, 255, 0.75);
+			color: var(--ink);
+			padding: 10px 12px;
+			border-radius: 12px;
+			cursor: pointer;
+			display: flex;
+			flex-direction: column;
+			gap: 4px;
+		}
+
+		.history-item.active {
+			border-color: #446448;
+			background: #f6fbf2;
+		}
+
+		.history-title {
+			font-size: 14px;
+			font-weight: 600;
+			line-height: 1.3;
+			white-space: nowrap;
+			overflow: hidden;
+			text-overflow: ellipsis;
+		}
+
+		.history-time {
+			font-size: 12px;
+			color: var(--muted);
+		}
+
+		.workspace {
+			flex: 1;
+			display: flex;
+			flex-direction: column;
+			min-width: 0;
 		}
 
 		.topbar {
 			padding: 18px 24px;
 			border-bottom: 1px solid var(--panel-border);
 			display: flex;
-			justify-content: center;
+			justify-content: space-between;
 			align-items: center;
 			background: rgba(255, 255, 255, 0.55);
 		}
@@ -70,6 +138,15 @@
 			letter-spacing: 0.3px;
 			font-size: 26px;
 			font-weight: 700;
+		}
+
+		.chat-label {
+			font-size: 13px;
+			color: var(--muted);
+			white-space: nowrap;
+			overflow: hidden;
+			text-overflow: ellipsis;
+			max-width: 320px;
 		}
 
 		.chatbox {
@@ -214,6 +291,25 @@
 				border-radius: 0;
 				border-left: 0;
 				border-right: 0;
+				flex-direction: column;
+			}
+
+			.sidebar {
+				width: 100%;
+				border-right: 0;
+				border-bottom: 1px solid var(--panel-border);
+				padding: 10px;
+				gap: 8px;
+			}
+
+			.history-list {
+				flex-direction: row;
+				overflow-x: auto;
+				overflow-y: hidden;
+			}
+
+			.history-item {
+				min-width: 200px;
 			}
 
 			.title {
@@ -228,33 +324,41 @@
 </head>
 <body>
 	<div class="app">
-		<header class="topbar">
-			<h1 class="title">Chat Bot</h1>
-		</header>
+		<aside class="sidebar">
+			<button id="newChatBtn" class="new-chat" type="button">+ New Chat</button>
+			<div id="historyList" class="history-list"></div>
+		</aside>
 
-		<main id="chatbox" class="chatbox">
-			<section class="empty" id="emptyState">
-				<h2>What can I help with?</h2>
-				<p>Ask anything to start your chat.</p>
-			</section>
-		</main>
+		<section class="workspace">
+			<header class="topbar">
+				<h1 class="title">Chat Bot</h1>
+				<div id="currentChatTitle" class="chat-label">New conversation</div>
+			</header>
 
-		<div class="composer-wrap">
-			<form id="chatForm" class="composer">
-				<button type="button" class="plus" aria-hidden="true">+</button>
-				<input
-					id="message"
-					class="input"
-					type="text"
-					placeholder="Ask anything"
-					autocomplete="off"
-					required
-				>
-				<button id="sendBtn" class="send" type="submit" aria-label="Send">
-					&#8593;
-				</button>
-			</form>
-		</div>
+			<main id="chatbox" class="chatbox">
+				<section class="empty" id="emptyState">
+					<h2>What can I help with?</h2>
+					<p>Ask anything to start your chat.</p>
+				</section>
+			</main>
+
+			<div class="composer-wrap">
+				<form id="chatForm" class="composer">
+					<button type="button" class="plus" aria-hidden="true">+</button>
+					<input
+						id="message"
+						class="input"
+						type="text"
+						placeholder="Ask anything"
+						autocomplete="off"
+						required
+					>
+					<button id="sendBtn" class="send" type="submit" aria-label="Send">
+						&#8593;
+					</button>
+				</form>
+			</div>
+		</section>
 	</div>
 
 	<script src="/static/script.js"></script>
