@@ -187,6 +187,38 @@
 			background: #f9e4e4;
 		}
 
+		.message-image {
+			display: block;
+			margin-top: 10px;
+			max-width: min(100%, 420px);
+			width: 100%;
+			height: auto;
+			border-radius: 12px;
+			border: 1px solid var(--panel-border);
+			box-shadow: 0 8px 18px rgba(17, 28, 14, 0.14);
+		}
+
+		.message-image-tools {
+			display: flex;
+			gap: 8px;
+			margin-top: 8px;
+		}
+
+		.image-tool-btn {
+			border: 1px solid var(--panel-border);
+			background: #f4f8ef;
+			color: var(--ink);
+			border-radius: 9px;
+			padding: 5px 10px;
+			font: inherit;
+			font-size: 12px;
+			cursor: pointer;
+		}
+
+		.image-tool-btn:hover {
+			background: #eaf2e2;
+		}
+
 		.empty {
 			margin: auto;
 			text-align: center;
@@ -250,6 +282,39 @@
 
 		.composer-actions.open {
 			display: block;
+		}
+
+		.actions-divider {
+			height: 1px;
+			background: var(--panel-border);
+			margin: 8px 4px;
+		}
+
+		.image-controls-title {
+			font-size: 11px;
+			font-weight: 700;
+			letter-spacing: 0.2px;
+			color: var(--muted);
+			padding: 4px 8px 6px;
+			text-transform: uppercase;
+		}
+
+		.image-controls-grid {
+			display: grid;
+			grid-template-columns: 1fr;
+			gap: 6px;
+			padding: 0 8px 8px;
+		}
+
+		.image-select {
+			width: 100%;
+			border: 1px solid var(--panel-border);
+			border-radius: 8px;
+			padding: 6px 8px;
+			font: inherit;
+			font-size: 13px;
+			background: #fbfdf9;
+			color: var(--ink);
 		}
 
 		.action-item {
@@ -404,6 +469,23 @@
 						<button type="button" class="action-item" data-action="thinking">Thinking</button>
 						<button type="button" class="action-item" data-action="deep-research">Deep research</button>
 						<button type="button" class="action-item" data-action="shopping-research">Shopping research</button>
+						<div class="actions-divider"></div>
+						<div class="image-controls-title">Image Controls</div>
+						<div class="image-controls-grid">
+							<select id="aspectRatioSelect" class="image-select" aria-label="Aspect ratio">
+								<option value="1:1">Square (1:1)</option>
+								<option value="9:16">Portrait (9:16)</option>
+								<option value="16:9">Landscape (16:9)</option>
+								<option value="4:5">Social portrait (4:5)</option>
+							</select>
+							<select id="styleSelect" class="image-select" aria-label="Image style">
+								<option value="realistic">Realistic</option>
+								<option value="anime">Anime</option>
+								<option value="cinematic">Cinematic</option>
+								<option value="watercolor">Watercolor</option>
+								<option value="digital-art">Digital art</option>
+							</select>
+						</div>
 					</div>
 					<input id="attachmentInput" type="file" accept="image/*,.pdf,.txt,.md,.json,.csv" multiple hidden>
 					<input

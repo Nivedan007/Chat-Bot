@@ -1,8 +1,10 @@
 import os
+import base64
 from pathlib import Path
 
 from flask import Flask, jsonify, render_template, request
 from google import genai
+from google.genai import types
 
 app = Flask(__name__)
 
@@ -26,10 +28,77 @@ MODE_INSTRUCTIONS = {
         "Provide product-comparison style guidance with trade-offs, budget options, key specs, and a short recommendation."
     ),
     "create-image": (
-        "You cannot return a real image file. Instead, provide a high-quality image generation prompt, "
-        "a negative prompt, and a short style note based on the user's request."
+        "Generate an image that matches the user request. Also include one short caption for the generated image."
     ),
 }
+
+ALLOWED_ASPECT_RATIOS = {"1:1", "9:16", "16:9", "4:5"}
+ALLOWED_STYLES = {"realistic", "anime", "cinematic", "watercolor", "digital-art"}
+
+
+def _extract_text_and_image(response) -> tuple[str, str | None, str | None]:
+    text_parts = []
+    image_b64 = None
+    image_mime = None
+
+    candidates = getattr(response, "candidates", None) or []
+    for candidate in candidates:
+        content = getattr(candidate, "content", None)
+        parts = getattr(content, "parts", None) or []
+        for part in parts:
+            text = getattr(part, "text", None)
+            if text:
+                text_parts.append(str(text))
+
+            inline_data = getattr(part, "inline_data", None)
+            data = getattr(inline_data, "data", None) if inline_data else None
+            if data and image_b64 is None:
+                if isinstance(data, bytes):
+                    image_b64 = base64.b64encode(data).decode("ascii")
+                else:
+                    image_b64 = str(data)
+                image_mime = getattr(inline_data, "mime_type", None) or "image/png"
+
+    text = "\n".join(part for part in text_parts if part).strip()
+    return text, image_b64, image_mime
+
+
+def _build_image_prompt(user_message: str, aspect_ratio: str, style: str) -> str:
+    return (
+        "Create a high-quality image based on the user request below. "
+        f"Use aspect ratio {aspect_ratio}. "
+        f"Art style: {style}. "
+        "Return one short caption describing the final image.\n\n"
+        f"User request: {user_message.strip()}"
+    )
+
+
+def _try_generate_image(client: genai.Client, prompt: str) -> tuple[str, str | None, str | None, list[str]]:
+    image_models = [
+        "gemini-2.0-flash-preview-image-generation",
+        "gemini-2.5-flash-image-preview",
+    ]
+    errors = []
+
+    for model_name in image_models:
+        try:
+            response = client.models.generate_content(
+                model=model_name,
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    response_modalities=["TEXT", "IMAGE"],
+                    temperature=0.4,
+                ),
+            )
+            text, image_b64, image_mime = _extract_text_and_image(response)
+            if image_b64:
+                caption = text or "Generated image"
+                return caption, image_b64, image_mime, errors
+            errors.append(f"{model_name}: No image returned")
+        except Exception as exc:
+            errors.append(f"{model_name}: {exc}")
+
+    return "", None, None, errors
 
 
 def _load_local_env() -> None:
@@ -84,6 +153,7 @@ def chat():
     raw_mode = str(payload.get("mode", "chat")).strip().lower()
     mode = raw_mode if raw_mode in MODE_INSTRUCTIONS else "chat"
     attachments = payload.get("attachments", [])
+    image_options = payload.get("image_options", {})
 
     if not user_message.strip():
         return jsonify({"reply": "Message cannot be empty."}), 400
@@ -118,6 +188,16 @@ def chat():
 
     mode_instruction = MODE_INSTRUCTIONS.get(mode, MODE_INSTRUCTIONS["chat"])
 
+    aspect_ratio = "1:1"
+    style = "realistic"
+    if isinstance(image_options, dict):
+        candidate_ratio = str(image_options.get("aspectRatio", "1:1")).strip()
+        candidate_style = str(image_options.get("style", "realistic")).strip().lower()
+        if candidate_ratio in ALLOWED_ASPECT_RATIOS:
+            aspect_ratio = candidate_ratio
+        if candidate_style in ALLOWED_STYLES:
+            style = candidate_style
+
     if conversation_lines:
         user_prompt = (
             "Use this conversation context to answer the latest user question clearly and completely.\n\n"
@@ -148,9 +228,28 @@ def chat():
         return jsonify({"reply": _local_fallback_reply(user_message)})
 
     client = genai.Client(api_key=api_key)
+
+    if mode == "create-image":
+        image_prompt = _build_image_prompt(user_message, aspect_ratio, style)
+        image_caption, image_b64, image_mime, image_errors = _try_generate_image(client, image_prompt)
+        if image_b64:
+            return jsonify(
+                {
+                    "reply": image_caption,
+                    "image_base64": image_b64,
+                    "image_mime": image_mime or "image/png",
+                    "image_options": {
+                        "aspectRatio": aspect_ratio,
+                        "style": style,
+                    },
+                }
+            )
+
+        # Fall through to text response if image generation is unavailable.
+
     # Try currently available models first to minimize quota/model-version failures.
     models = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-2.0-flash-lite"]
-    errors = []
+    errors = image_errors if mode == "create-image" else []
 
     for model_name in models:
         try:
