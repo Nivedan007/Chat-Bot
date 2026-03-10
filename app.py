@@ -13,6 +13,24 @@ SYSTEM_PROMPT = (
     "Keep the response focused on what was asked."
 )
 
+MODE_INSTRUCTIONS = {
+    "chat": "Respond normally in concise helpful style.",
+    "thinking": (
+        "Think through the problem carefully and provide a step-by-step answer with clear reasoning, "
+        "but keep it readable and not overly verbose."
+    ),
+    "deep-research": (
+        "Provide a detailed, research-style answer. Structure with short sections and practical evidence-based guidance."
+    ),
+    "shopping-research": (
+        "Provide product-comparison style guidance with trade-offs, budget options, key specs, and a short recommendation."
+    ),
+    "create-image": (
+        "You cannot return a real image file. Instead, provide a high-quality image generation prompt, "
+        "a negative prompt, and a short style note based on the user's request."
+    ),
+}
+
 
 def _load_local_env() -> None:
     # Minimal .env parser for simple KEY=VALUE lines.
@@ -63,6 +81,10 @@ def chat():
     payload = request.get_json(silent=True) or {}
     user_message = payload.get("message", "")
     history = payload.get("history", [])
+    raw_mode = str(payload.get("mode", "chat")).strip().lower()
+    mode = raw_mode if raw_mode in MODE_INSTRUCTIONS else "chat"
+    attachments = payload.get("attachments", [])
+
     if not user_message.strip():
         return jsonify({"reply": "Message cannot be empty."}), 400
 
@@ -78,14 +100,47 @@ def chat():
                 continue
             conversation_lines.append(f"{role.title()}: {content}")
 
+    attachment_lines = []
+    if isinstance(attachments, list):
+        # Keep attachment context bounded to avoid oversized prompts.
+        for entry in attachments[:5]:
+            if not isinstance(entry, dict):
+                continue
+
+            name = str(entry.get("name", "unknown")).strip()[:120]
+            file_type = str(entry.get("type", "unknown")).strip()[:100]
+            size = entry.get("size", 0)
+            content = str(entry.get("content", "")).strip()[:2000]
+
+            attachment_lines.append(f"File: {name} | Type: {file_type} | Size: {size} bytes")
+            if content:
+                attachment_lines.append(f"Extracted text: {content}")
+
+    mode_instruction = MODE_INSTRUCTIONS.get(mode, MODE_INSTRUCTIONS["chat"])
+
     if conversation_lines:
         user_prompt = (
             "Use this conversation context to answer the latest user question clearly and completely.\n\n"
             + "\n".join(conversation_lines)
+            + (
+                "\n\nAttachments available:\n" + "\n".join(attachment_lines)
+                if attachment_lines
+                else ""
+            )
+            + f"\n\nSelected mode: {mode}\nMode instruction: {mode_instruction}"
             + f"\n\nLatest user question: {user_message.strip()}"
         )
     else:
-        user_prompt = user_message.strip()
+        user_prompt = (
+            f"Selected mode: {mode}\n"
+            f"Mode instruction: {mode_instruction}\n"
+            + (
+                "Attachments available:\n" + "\n".join(attachment_lines) + "\n"
+                if attachment_lines
+                else ""
+            )
+            + f"User question: {user_message.strip()}"
+        )
 
     api_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
     if not api_key:

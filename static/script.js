@@ -5,11 +5,27 @@ const sendBtn = document.getElementById("sendBtn");
 const historyList = document.getElementById("historyList");
 const newChatBtn = document.getElementById("newChatBtn");
 const currentChatTitle = document.getElementById("currentChatTitle");
+const plusBtn = document.getElementById("plusBtn");
+const actionsMenu = document.getElementById("actionsMenu");
+const attachmentInput = document.getElementById("attachmentInput");
+const modeBadge = document.getElementById("modeBadge");
+const contextHint = document.getElementById("contextHint");
 
 const STORAGE_KEY = "chatbot_conversations_v1";
+const MODE_LABELS = {
+	chat: "Chat",
+	"create-image": "Create image",
+	thinking: "Thinking",
+	"deep-research": "Deep research",
+	"shopping-research": "Shopping research"
+};
+const MAX_ATTACHMENT_BYTES = 400000;
+const MAX_ATTACHMENTS = 3;
 
 let conversations = [];
 let currentConversationId = null;
+let selectedMode = "chat";
+let pendingAttachments = [];
 
 function escapeHtml(text) {
 	return String(text)
@@ -22,6 +38,77 @@ function escapeHtml(text) {
 
 function scrollToBottom() {
 	chatbox.scrollTop = chatbox.scrollHeight;
+}
+
+function setMode(mode) {
+	selectedMode = MODE_LABELS[mode] ? mode : "chat";
+	modeBadge.textContent = `Mode: ${MODE_LABELS[selectedMode]}`;
+	renderContextHint();
+}
+
+function closeActionsMenu() {
+	actionsMenu.classList.remove("open");
+	actionsMenu.setAttribute("aria-hidden", "true");
+}
+
+function toggleActionsMenu() {
+	const isOpen = actionsMenu.classList.contains("open");
+	if (isOpen) {
+		closeActionsMenu();
+		return;
+	}
+	actionsMenu.classList.add("open");
+	actionsMenu.setAttribute("aria-hidden", "false");
+}
+
+function formatAttachmentSize(bytes) {
+	if (bytes >= 1024 * 1024) {
+		return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+	}
+	if (bytes >= 1024) {
+		return `${Math.round(bytes / 1024)} KB`;
+	}
+	return `${bytes} B`;
+}
+
+function isTextLikeFile(file) {
+	if (file.type.startsWith("text/")) {
+		return true;
+	}
+	const lower = file.name.toLowerCase();
+	return lower.endsWith(".json") || lower.endsWith(".csv") || lower.endsWith(".md") || lower.endsWith(".txt");
+}
+
+async function parseAttachment(file) {
+	const parsed = {
+		name: file.name,
+		type: file.type || "application/octet-stream",
+		size: file.size,
+		content: ""
+	};
+
+	if (isTextLikeFile(file) && file.size <= MAX_ATTACHMENT_BYTES) {
+		try {
+			parsed.content = (await file.text()).slice(0, 12000);
+		} catch {
+			parsed.content = "";
+		}
+	}
+
+	return parsed;
+}
+
+function renderContextHint() {
+	const modeText = `Mode: ${MODE_LABELS[selectedMode]}`;
+	if (!pendingAttachments.length) {
+		contextHint.textContent = modeText;
+		return;
+	}
+
+	const fileText = pendingAttachments
+		.map((file) => `${file.name} (${formatAttachmentSize(file.size)})`)
+		.join(", ");
+	contextHint.textContent = `${modeText} | Files: ${fileText}`;
 }
 
 function uid() {
@@ -196,6 +283,7 @@ async function sendMessage() {
 	addMessageToCurrent("user", message);
 	input.value = "";
 	sendBtn.disabled = true;
+	closeActionsMenu();
 	scrollToBottom();
 
 	const typing = appendMessage("assistant", "Thinking...");
@@ -211,7 +299,9 @@ async function sendMessage() {
 			},
 			body: JSON.stringify({
 				message,
-				history
+				history,
+				mode: selectedMode,
+				attachments: pendingAttachments
 			})
 		});
 
@@ -229,6 +319,8 @@ async function sendMessage() {
 		const replyText = data.reply || "No response received.";
 		await typeReply(typing, replyText);
 		addMessageToCurrent("assistant", replyText);
+		pendingAttachments = [];
+		renderContextHint();
 	} catch (error) {
 		const errorText = error.message || "Something went wrong.";
 		await typeReply(typing, errorText);
@@ -251,8 +343,51 @@ newChatBtn.addEventListener("click", () => {
 	input.focus();
 });
 
+plusBtn.addEventListener("click", () => {
+	toggleActionsMenu();
+});
+
+document.addEventListener("click", (event) => {
+	if (!actionsMenu.contains(event.target) && !plusBtn.contains(event.target)) {
+		closeActionsMenu();
+	}
+});
+
+actionsMenu.addEventListener("click", (event) => {
+	const actionButton = event.target.closest("[data-action]");
+	if (!actionButton) {
+		return;
+	}
+
+	const action = actionButton.getAttribute("data-action") || "chat";
+	if (action === "add-files") {
+		attachmentInput.click();
+		closeActionsMenu();
+		return;
+	}
+
+	setMode(action);
+	closeActionsMenu();
+	input.focus();
+});
+
+attachmentInput.addEventListener("change", async () => {
+	const files = Array.from(attachmentInput.files || []).slice(0, MAX_ATTACHMENTS);
+	const parsed = [];
+
+	for (const file of files) {
+		parsed.push(await parseAttachment(file));
+	}
+
+	pendingAttachments = parsed;
+	renderContextHint();
+	attachmentInput.value = "";
+});
+
 loadConversations();
 ensureConversationSelected();
 renderHistoryList();
 renderCurrentConversation();
+setMode("chat");
+renderContextHint();
 input.focus();
