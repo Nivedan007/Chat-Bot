@@ -125,6 +125,23 @@ function appendMessage(role, content, extraClass = "") {
 	return msg;
 }
 
+function sleep(ms) {
+	return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function typeReply(element, fullText) {
+	const text = String(fullText || "");
+	const tokens = text.match(/\S+\s*/g) || text.split("");
+	element.textContent = "";
+
+	for (const token of tokens) {
+		element.textContent += token;
+		scrollToBottom();
+		// Slightly faster cadence for a smooth ChatGPT-like reveal.
+		await sleep(26);
+	}
+}
+
 function renderCurrentConversation() {
 	const conversation = getCurrentConversation();
 	chatbox.innerHTML = "";
@@ -210,11 +227,11 @@ async function sendMessage() {
 		}
 
 		const replyText = data.reply || "No response received.";
-		typing.textContent = replyText;
+		await typeReply(typing, replyText);
 		addMessageToCurrent("assistant", replyText);
 	} catch (error) {
 		const errorText = error.message || "Something went wrong.";
-		typing.textContent = errorText;
+		await typeReply(typing, errorText);
 		typing.classList.add("error");
 		addMessageToCurrent("assistant", errorText, true);
 	} finally {
