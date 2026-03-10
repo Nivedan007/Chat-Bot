@@ -1,5 +1,6 @@
 import os
 import base64
+import html
 from pathlib import Path
 
 from flask import Flask, jsonify, render_template, request
@@ -133,6 +134,40 @@ def _build_quota_message(raw_error: str) -> str:
     return f"Gemini request failed: {raw_error}"
 
 
+def _looks_like_image_request(user_message: str) -> bool:
+    text = user_message.strip().lower()
+    image_phrases = [
+        "generate image",
+        "create image",
+        "make image",
+        "draw",
+        "illustration",
+        "image of",
+        "picture of",
+        "photo of",
+        "logo",
+    ]
+    return any(phrase in text for phrase in image_phrases)
+
+
+def _build_placeholder_image_svg(user_message: str) -> str:
+    safe_text = html.escape(user_message.strip()[:80] or "Generated image")
+    svg = f"""<svg xmlns='http://www.w3.org/2000/svg' width='1024' height='1024' viewBox='0 0 1024 1024'>
+<defs>
+<linearGradient id='g' x1='0' y1='0' x2='1' y2='1'>
+<stop offset='0%' stop-color='#dcebd1'/>
+<stop offset='100%' stop-color='#c7dbbf'/>
+</linearGradient>
+</defs>
+<rect width='1024' height='1024' fill='url(#g)'/>
+<rect x='92' y='92' width='840' height='840' rx='40' fill='white' opacity='0.72'/>
+<text x='512' y='470' text-anchor='middle' fill='#1f2a1e' font-size='46' font-family='Arial, sans-serif'>Image Preview</text>
+<text x='512' y='540' text-anchor='middle' fill='#35573a' font-size='30' font-family='Arial, sans-serif'>{safe_text}</text>
+<text x='512' y='604' text-anchor='middle' fill='#5a6857' font-size='24' font-family='Arial, sans-serif'>Set GEMINI_API_KEY for real generated images</text>
+</svg>"""
+    return base64.b64encode(svg.encode("utf-8")).decode("ascii")
+
+
 def _local_fallback_reply(user_message: str) -> str:
     # Keep the app usable when external quota/key issues occur.
     return (
@@ -142,7 +177,8 @@ def _local_fallback_reply(user_message: str) -> str:
 
 @app.route("/")
 def home():
-    return render_template("index.html")
+    asset_version = os.environ.get("VERCEL_GIT_COMMIT_SHA", "dev")[:8]
+    return render_template("index.html", asset_version=asset_version)
 
 
 @app.route("/chat", methods=["POST"])
@@ -157,6 +193,10 @@ def chat():
 
     if not user_message.strip():
         return jsonify({"reply": "Message cannot be empty."}), 400
+
+    # Handle common user behavior: asking for images while still in Chat mode.
+    if mode == "chat" and _looks_like_image_request(user_message):
+        mode = "create-image"
 
     conversation_lines = []
     if isinstance(history, list):
@@ -222,10 +262,34 @@ def chat():
             + f"User question: {user_message.strip()}"
         )
 
-    api_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
+    api_key = (
+        os.environ.get("GEMINI_API_KEY")
+        or os.environ.get("GOOGLE_API_KEY")
+        or os.environ.get("GOOGLE_GENERATIVE_AI_API_KEY")
+    )
     if not api_key:
-        # Keep the app functional in deployment even if env vars are not configured yet.
-        return jsonify({"reply": _local_fallback_reply(user_message)})
+        if mode == "create-image":
+            # Return a local placeholder image so the UI flow remains functional.
+            return jsonify(
+                {
+                    "reply": (
+                        "Generated a local placeholder image. "
+                        "Add GEMINI_API_KEY in deployment settings for real AI image generation."
+                    ),
+                    "image_base64": _build_placeholder_image_svg(user_message),
+                    "image_mime": "image/svg+xml",
+                }
+            )
+
+        # Keep chat usable and include actionable deployment guidance.
+        return jsonify(
+            {
+                "reply": (
+                    _local_fallback_reply(user_message)
+                    + "\n\nTo enable real AI responses in production, set GEMINI_API_KEY in your deployment environment variables and redeploy."
+                )
+            }
+        )
 
     client = genai.Client(api_key=api_key)
 
