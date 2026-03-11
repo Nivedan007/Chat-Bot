@@ -166,6 +166,17 @@ function getCurrentConversation() {
 	return conversations.find((item) => item.id === currentConversationId) || null;
 }
 
+function deleteConversation(id) {
+	conversations = conversations.filter((item) => item.id !== id);
+	if (currentConversationId === id) {
+		currentConversationId = conversations.length ? conversations[0].id : null;
+	}
+	saveConversations();
+	ensureConversationSelected();
+	renderHistoryList();
+	renderCurrentConversation();
+}
+
 function ensureConversationSelected() {
 	if (!conversations.length) {
 		createConversation();
@@ -201,14 +212,23 @@ function renderHistoryList() {
 			}
 
 			button.innerHTML = `
-				<div class="history-title">${escapeHtml(conversation.title || "New conversation")}</div>
-				<div class="history-time">${formatTime(conversation.updatedAt)}</div>
+				<div class="history-item-text">
+					<div class="history-title">${escapeHtml(conversation.title || "New conversation")}</div>
+					<div class="history-time">${formatTime(conversation.updatedAt)}</div>
+				</div>
+				<button type="button" class="history-delete-btn" aria-label="Delete conversation" title="Delete">&#x2715;</button>
 			`;
 
 			button.addEventListener("click", () => {
 				currentConversationId = conversation.id;
 				renderHistoryList();
 				renderCurrentConversation();
+			});
+
+			const deleteBtn = button.querySelector(".history-delete-btn");
+			deleteBtn.addEventListener("click", (e) => {
+				e.stopPropagation();
+				deleteConversation(conversation.id);
 			});
 
 			historyList.appendChild(button);
