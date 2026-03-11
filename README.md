@@ -46,3 +46,5 @@ Open: `http://127.0.0.1:5001`
 
 - Never commit `.env` with real keys.
 - Rotate your Gemini key if it was ever exposed.
+- If a key is blocked/leaked, create a new key in Google AI Studio, set it in `.env`, and redeploy your hosting platform env vars.
+- Use `.env.example` as the safe template for required variables.
