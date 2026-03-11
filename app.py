@@ -99,25 +99,58 @@ def _try_generate_image(client: genai.Client, prompt: str) -> tuple[str, str | N
         except Exception as exc:
             errors.append(f"{model_name}: {exc}")
 
+    # Fallback to Imagen endpoint if Gemini image generation models are unavailable.
+    imagen_models = [
+        "imagen-3.0-generate-002",
+        "imagen-4.0-generate-preview-06-06",
+    ]
+
+    for model_name in imagen_models:
+        try:
+            response = client.models.generate_images(
+                model=model_name,
+                prompt=prompt,
+                config=types.GenerateImagesConfig(number_of_images=1),
+            )
+            generated_images = getattr(response, "generated_images", None) or []
+            if not generated_images:
+                errors.append(f"{model_name}: No generated images returned")
+                continue
+
+            first = generated_images[0]
+            image_obj = getattr(first, "image", None)
+            image_bytes = getattr(image_obj, "image_bytes", None) if image_obj else None
+            image_mime = getattr(image_obj, "mime_type", None) if image_obj else None
+            if image_bytes:
+                return "Generated image", base64.b64encode(image_bytes).decode("ascii"), image_mime or "image/png", errors
+
+            errors.append(f"{model_name}: Missing image bytes")
+        except Exception as exc:
+            errors.append(f"{model_name}: {exc}")
+
     return "", None, None, errors
 
 
 def _load_local_env() -> None:
-    # Minimal .env parser for simple KEY=VALUE lines.
-    env_path = Path(__file__).resolve().parent / ".env"
-    if not env_path.exists():
-        return
+    # Minimal parser for local env files with simple KEY=VALUE lines.
+    # Supports both .env and .en because some local setups in this repo use .en.
+    base_path = Path(__file__).resolve().parent
+    env_files = [base_path / ".env", base_path / ".en"]
 
-    for raw_line in env_path.read_text(encoding="utf-8").splitlines():
-        line = raw_line.strip()
-        if not line or line.startswith("#") or "=" not in line:
+    for env_path in env_files:
+        if not env_path.exists():
             continue
 
-        key, value = line.split("=", 1)
-        key = key.strip()
-        value = value.strip().strip('"').strip("'")
-        if key:
-            os.environ[key] = value
+        for raw_line in env_path.read_text(encoding="utf-8").splitlines():
+            line = raw_line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+
+            key, value = line.split("=", 1)
+            key = key.strip()
+            value = value.strip().strip('"').strip("'")
+            if key and key not in os.environ:
+                os.environ[key] = value
 
 
 _load_local_env()
@@ -291,6 +324,14 @@ def chat():
             }
         )
 
+    # If a Gemini key is present, prefer it over other aliases to avoid SDK auto-selecting
+    # a stale GOOGLE_API_KEY when both are set.
+    preferred_gemini_key = os.environ.get("GEMINI_API_KEY")
+    if preferred_gemini_key:
+        os.environ.pop("GOOGLE_API_KEY", None)
+        os.environ.pop("GOOGLE_GENERATIVE_AI_API_KEY", None)
+        api_key = preferred_gemini_key
+
     client = genai.Client(api_key=api_key)
 
     if mode == "create-image":
@@ -308,8 +349,24 @@ def chat():
                     },
                 }
             )
-
-        # Fall through to text response if image generation is unavailable.
+        # Keep create-image UX functional even when model availability/quota blocks image output.
+        error_hint = ""
+        if image_errors:
+            error_hint = f" (Image model unavailable: {image_errors[-1]})"
+        return jsonify(
+            {
+                "reply": (
+                    "Generated a local placeholder image because AI image generation is temporarily unavailable"
+                    f"{error_hint}."
+                ),
+                "image_base64": _build_placeholder_image_svg(user_message),
+                "image_mime": "image/svg+xml",
+                "image_options": {
+                    "aspectRatio": aspect_ratio,
+                    "style": style,
+                },
+            }
+        )
 
     # Try currently available models first to minimize quota/model-version failures.
     models = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-2.0-flash-lite"]
