@@ -76,8 +76,9 @@ def _build_image_prompt(user_message: str, aspect_ratio: str, style: str) -> str
 
 def _try_generate_image(client: genai.Client, prompt: str) -> tuple[str, str | None, str | None, list[str]]:
     image_models = [
-        "gemini-2.0-flash-preview-image-generation",
-        "gemini-2.5-flash-image-preview",
+        "gemini-2.5-flash-image",
+        "gemini-3.1-flash-image-preview",
+        "gemini-3-pro-image-preview",
     ]
     errors = []
 
@@ -101,8 +102,9 @@ def _try_generate_image(client: genai.Client, prompt: str) -> tuple[str, str | N
 
     # Fallback to Imagen endpoint if Gemini image generation models are unavailable.
     imagen_models = [
-        "imagen-3.0-generate-002",
-        "imagen-4.0-generate-preview-06-06",
+        "imagen-4.0-generate-001",
+        "imagen-4.0-fast-generate-001",
+        "imagen-4.0-ultra-generate-001",
     ]
 
     for model_name in imagen_models:
