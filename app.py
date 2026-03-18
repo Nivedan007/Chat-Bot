@@ -4,8 +4,7 @@ import html
 from pathlib import Path
 
 from flask import Flask, jsonify, render_template, request
-from google import genai
-from google.genai import types
+from openai import OpenAI
 
 app = Flask(__name__)
 
@@ -37,31 +36,13 @@ ALLOWED_ASPECT_RATIOS = {"1:1", "9:16", "16:9", "4:5"}
 ALLOWED_STYLES = {"realistic", "anime", "cinematic", "watercolor", "digital-art"}
 
 
-def _extract_text_and_image(response) -> tuple[str, str | None, str | None]:
-    text_parts = []
-    image_b64 = None
-    image_mime = None
-
-    candidates = getattr(response, "candidates", None) or []
-    for candidate in candidates:
-        content = getattr(candidate, "content", None)
-        parts = getattr(content, "parts", None) or []
-        for part in parts:
-            text = getattr(part, "text", None)
-            if text:
-                text_parts.append(str(text))
-
-            inline_data = getattr(part, "inline_data", None)
-            data = getattr(inline_data, "data", None) if inline_data else None
-            if data and image_b64 is None:
-                if isinstance(data, bytes):
-                    image_b64 = base64.b64encode(data).decode("ascii")
-                else:
-                    image_b64 = str(data)
-                image_mime = getattr(inline_data, "mime_type", None) or "image/png"
-
-    text = "\n".join(part for part in text_parts if part).strip()
-    return text, image_b64, image_mime
+def _extract_text_from_response(response) -> str:
+    """Extract text from OpenAI/Grok response."""
+    if hasattr(response, 'choices') and response.choices:
+        first_choice = response.choices[0]
+        if hasattr(first_choice, 'message') and hasattr(first_choice.message, 'content'):
+            return first_choice.message.content
+    return ""
 
 
 def _build_image_prompt(user_message: str, aspect_ratio: str, style: str) -> str:
@@ -74,62 +55,9 @@ def _build_image_prompt(user_message: str, aspect_ratio: str, style: str) -> str
     )
 
 
-def _try_generate_image(client: genai.Client, prompt: str) -> tuple[str, str | None, str | None, list[str]]:
-    image_models = [
-        "gemini-2.5-flash-image",
-        "gemini-3.1-flash-image-preview",
-        "gemini-3-pro-image-preview",
-    ]
-    errors = []
-
-    for model_name in image_models:
-        try:
-            response = client.models.generate_content(
-                model=model_name,
-                contents=prompt,
-                config=types.GenerateContentConfig(
-                    response_modalities=["TEXT", "IMAGE"],
-                    temperature=0.4,
-                ),
-            )
-            text, image_b64, image_mime = _extract_text_and_image(response)
-            if image_b64:
-                caption = text or "Generated image"
-                return caption, image_b64, image_mime, errors
-            errors.append(f"{model_name}: No image returned")
-        except Exception as exc:
-            errors.append(f"{model_name}: {exc}")
-
-    # Fallback to Imagen endpoint if Gemini image generation models are unavailable.
-    imagen_models = [
-        "imagen-4.0-generate-001",
-        "imagen-4.0-fast-generate-001",
-        "imagen-4.0-ultra-generate-001",
-    ]
-
-    for model_name in imagen_models:
-        try:
-            response = client.models.generate_images(
-                model=model_name,
-                prompt=prompt,
-                config=types.GenerateImagesConfig(number_of_images=1),
-            )
-            generated_images = getattr(response, "generated_images", None) or []
-            if not generated_images:
-                errors.append(f"{model_name}: No generated images returned")
-                continue
-
-            first = generated_images[0]
-            image_obj = getattr(first, "image", None)
-            image_bytes = getattr(image_obj, "image_bytes", None) if image_obj else None
-            image_mime = getattr(image_obj, "mime_type", None) if image_obj else None
-            if image_bytes:
-                return "Generated image", base64.b64encode(image_bytes).decode("ascii"), image_mime or "image/png", errors
-
-            errors.append(f"{model_name}: Missing image bytes")
-        except Exception as exc:
-            errors.append(f"{model_name}: {exc}")
-
+def _try_generate_image(client: OpenAI, prompt: str) -> tuple[str, str | None, str | None, list[str]]:
+    """Grok API doesn't support image generation, return placeholder."""
+    errors = ["Grok API does not support image generation. Please use Gemini or a dedicated image API."]
     return "", None, None, errors
 
 
@@ -159,14 +87,14 @@ _load_local_env()
 
 
 def _build_quota_message(raw_error: str) -> str:
-    if "API_KEY_INVALID" in raw_error or "INVALID_ARGUMENT" in raw_error:
-        return "Gemini API key is invalid. Update GEMINI_API_KEY in .env and restart the app."
-    if "RESOURCE_EXHAUSTED" in raw_error or "429" in raw_error:
+    if "API_KEY_INVALID" in raw_error or "authentication" in raw_error.lower():
+        return "Grok API key is invalid. Update GEMINI_API_KEY in .env and restart the app."
+    if "RESOURCE_EXHAUSTED" in raw_error or "429" in raw_error or "rate_limit" in raw_error.lower():
         return (
-            "Gemini quota exceeded. Please wait a bit and try again, "
-            "or switch to a key/project with available quota."
+            "Grok API rate limit exceeded. Please wait a bit and try again, "
+            "or upgrade your account for higher limits."
         )
-    return f"Gemini request failed: {raw_error}"
+    return f"Grok API request failed: {raw_error}"
 
 
 def _looks_like_image_request(user_message: str) -> bool:
@@ -206,7 +134,7 @@ def _build_placeholder_image_svg(user_message: str) -> str:
 def _local_fallback_reply(user_message: str) -> str:
     # Keep the app usable when external quota/key issues occur.
     return (
-        "Gemini is temporarily unavailable, so this is a local fallback response. "
+        "Grok AI is temporarily unavailable, so this is a local fallback response. "
         f"You said: {user_message}"
     )
 
@@ -309,7 +237,7 @@ def chat():
                 {
                     "reply": (
                         "Generated a local placeholder image. "
-                        "Add GEMINI_API_KEY in deployment settings for real AI image generation."
+                        "Add GEMINI_API_KEY (Grok API key) in deployment settings for real AI responses."
                     ),
                     "image_base64": _build_placeholder_image_svg(user_message),
                     "image_mime": "image/svg+xml",
@@ -321,20 +249,16 @@ def chat():
             {
                 "reply": (
                     _local_fallback_reply(user_message)
-                    + "\n\nTo enable real AI responses in production, set GEMINI_API_KEY in your deployment environment variables and redeploy."
+                    + "\n\nTo enable real AI responses in production, set GEMINI_API_KEY (Grok key) in your deployment environment variables and redeploy."
                 )
             }
         )
 
-    # If a Gemini key is present, prefer it over other aliases to avoid SDK auto-selecting
-    # a stale GOOGLE_API_KEY when both are set.
-    preferred_gemini_key = os.environ.get("GEMINI_API_KEY")
-    if preferred_gemini_key:
-        os.environ.pop("GOOGLE_API_KEY", None)
-        os.environ.pop("GOOGLE_GENERATIVE_AI_API_KEY", None)
-        api_key = preferred_gemini_key
-
-    client = genai.Client(api_key=api_key)
+    # Initialize Grok API client pointing to xAI's endpoint
+    client = OpenAI(
+        api_key=api_key,
+        base_url="https://api.x.ai/v1"
+    )
 
     if mode == "create-image":
         image_prompt = _build_image_prompt(user_message, aspect_ratio, style)
@@ -370,25 +294,25 @@ def chat():
             }
         )
 
-    # Try currently available models first to minimize quota/model-version failures.
-    models = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-2.0-flash-lite"]
+    # Grok model (xAI provides grok-beta as the main model)
+    models = ["grok-beta", "grok-vision-beta"]
     errors = image_errors if mode == "create-image" else []
 
     for model_name in models:
         try:
-            response = client.models.generate_content(
+            response = client.chat.completions.create(
                 model=model_name,
-                contents=[
-                    SYSTEM_PROMPT,
-                    user_prompt,
+                messages=[
+                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {"role": "user", "content": user_prompt},
                 ],
-                config={
-                    "temperature": 0.3,
-                    "max_output_tokens": 2048,
-                },
+                temperature=0.3,
+                max_tokens=2048,
             )
-            reply = response.text if response and response.text else "No response generated."
-            return jsonify({"reply": reply})
+            reply = _extract_text_from_response(response)
+            if reply:
+                return jsonify({"reply": reply})
+            errors.append(f"{model_name}: No response generated")
         except Exception as exc:
             errors.append(str(exc))
             continue
